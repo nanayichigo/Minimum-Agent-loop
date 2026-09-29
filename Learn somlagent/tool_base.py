@@ -1,8 +1,9 @@
 # coding=utf-8 
 from abc import ABC,abstractmethod
 from pydantic import BaseModel
-from typing import Any
+from typing import Any,Callable
 import time
+import inspect
 
 class Tool(ABC):
 	name : str
@@ -68,16 +69,84 @@ class Weather_tool(Tool):
 			},
 		}
 
-	def forward(self, city_name : str) -> str:
-		return f"{city_name}今天天气晴朗"
+	def forward(self, city : str) -> str:
+		return f"{city}今天天气晴朗"
+
+_PY_TO_JSON : dict = {
+	str : "string",
+	int : "integer",
+	bool : "boolean",
+	float : "number",
+	list : "Array",
+	dict : "object",
+}
+
+def python_type_to_json_type(annotation) -> str:
+	'''python类型向json类型转换'''
+	if annotation in _PY_TO_JSON :
+		return _PY_TO_JSON[annotation]
+
+def tool(fn : Callable) -> Tool:
+	'''tool装饰器,返回包装好的Tool子类'''
+	class SimpleTool(Tool):
+		sig = inspect.signature(fn)
+		name = fn.__name__
+		description = (fn.__doc__ or "").strip().split("\n")[0]
+		inputs = {}
+		required = []
+		for pname, param in sig.parameters.items():
+			if param.annotation is inspect.Parameter.empty:
+				raise TypeError(f"参数 {pname} 缺少类型注解，@tool 需要它来生成 schema")
+			inputs[pname] = {
+				"type" : python_type_to_json_type(param.annotation),
+				"description" : pname,
+			}
+			if param.default is inspect.Parameter.empty:
+				required.append(pname)
+				inputs[pname]["required"] = True
+			else:
+				inputs[pname]["required"] = False
+
+		def forward(self, **kwargs) -> str:
+			return fn(**kwargs)
+	return SimpleTool()
+
+@tool
+def get_cur_time() -> str:
+	return f"{time.strftime('%X')}"
 
 if __name__ == "__main__":
-	weather_tool = Weather_tool()
-	s = Weather_tool().to_schema()
-	assert s["type"] == "function"
-	assert s["name"] == "Weather_tool"
-	assert s["parameters"]["required"] == ["city"]
-	assert s["parameters"]["properties"]["city"]["type"] == "string"
-	assert "required" not in s["parameters"]["properties"]["city"] 
-	assert s["parameters"]["properties"]["city"]["description"] == "城市名"
-	print(weather_tool(city_name = "北京"))
+    # --- 基类层面 ---
+    try:
+        Tool(); raise SystemExit("❌ Tool() 不该能实例化")
+    except TypeError:
+        pass
+
+    # --- 类式工具 ---
+    w = Weather_tool()
+    assert w.name == "Weather_tool"
+    assert w(city="北京").startswith("北京")
+    s = w.to_schema()
+    assert s["parameters"]["required"] == ["city"]
+    assert "required" not in s["parameters"]["properties"]["city"]
+
+    # --- 无参数工具 ---
+    t = Time_tool()
+    ts = t.to_schema()
+    assert ts["parameters"]["properties"] == {}
+    assert ts["parameters"]["required"] == []
+    assert ":" in t()
+
+    # --- 装饰器工具 ---
+    assert isinstance(get_cur_time, Tool)
+    assert type(get_cur_time).__name__ == "SimpleTool"
+    assert get_cur_time.name == "get_cur_time"
+
+    # --- 统一注册与调用（模拟 Agent 的行为）---
+    tools = [Weather_tool(), Time_tool(), get_cur_time]
+    tools_by_name = {x.name: x for x in tools}
+    schemas = [x.to_schema() for x in tools]
+    assert len(schemas) == 3
+    assert tools_by_name["Weather_tool"](city="上海").startswith("上海")
+
+    print("✅ 第 1 拆全部通过")
