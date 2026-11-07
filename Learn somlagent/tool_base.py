@@ -30,11 +30,11 @@ class Tool(ABC):
 		return self.forward(**kwargs)
 
 	def to_schema(self) -> dict:
-		requried : list = []
-		properties : dict[str, dict] = {**self.inputs}
-		for key in properties:
-			if properties[key].pop("required"):
-				requried.append(key)
+		required : list = []
+		properties = {k: {**v} for k, v in self.inputs.items()}
+		for key, prop in properties.items():
+			if prop.pop("required", True):
+				required.append(key)
 		
 		return {
 			"type" : "function",
@@ -43,7 +43,7 @@ class Tool(ABC):
 			"parameters" : {
 				"type" : "object",
 				"properties" : properties,
-				"required" : requried,
+				"required" : required,
 			},
 		}
 
@@ -55,7 +55,7 @@ class Time_tool(Tool):
 		self.inputs = {}
 
 	def forward(self) -> str:
-		return f"现在时间是{time.strftime("%X")}"
+		return f"现在时间是{time.strftime('%X')}"
 
 class Weather_tool(Tool):
 	def __init__(self):
@@ -77,7 +77,7 @@ _PY_TO_JSON : dict = {
 	int : "integer",
 	bool : "boolean",
 	float : "number",
-	list : "Array",
+	list : "array",
 	dict : "object",
 }
 
@@ -85,6 +85,8 @@ def python_type_to_json_type(annotation) -> str:
 	'''python类型向json类型转换'''
 	if annotation in _PY_TO_JSON :
 		return _PY_TO_JSON[annotation]
+	else:
+		raise TypeError(f"不支持的类型注解：{annotation}")
 
 def tool(fn : Callable) -> Tool:
 	'''tool装饰器,返回包装好的Tool子类'''
